@@ -1,0 +1,17 @@
+# Ignore environment files
+.env
+
+# Ignore virtual environment
+.venv/
+
+# Ignore Python cache
+__pycache__/
+
+# Ignore macOS system file
+.DS_Store
+
+# Ignore generated or output folders
+coverage_images/
+downloaded_images/
+results/
+results_confirm/

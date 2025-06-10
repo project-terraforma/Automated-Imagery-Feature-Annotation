@@ -1,7 +1,8 @@
 import os
 import math
 import json
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
+from datetime import datetime # Added for date operations
 
 import requests
 import cv2 # type: ignore
@@ -42,12 +43,14 @@ def fetch_images(
     lat: float,
     lon: float,
     radius_m: float,
-    fields: List[str] | None = None
+    fields: Optional[List[str]] = None,
+    min_capture_date_filter: Optional[datetime.date] = None
 ) -> List[Dict]:
     """Query Mapillary Graph API for images inside *radius_m* of *lat*, *lon*.
 
     The function returns a list of dictionaries, one for every image whose centre point
     falls inside the requested radius.
+    Optionally filters images by a minimum capture date.
     """
     if not token:
         raise ValueError("MAPILLARY_ACCESS_TOKEN (token) must be provided.")
@@ -55,7 +58,8 @@ def fetch_images(
     if fields is None:
         fields = [
             "id", "computed_geometry", "captured_at", "compass_angle",
-            "thumb_256_url", "thumb_1024_url", "thumb_2048_url", "thumb_original_url"
+            "thumb_256_url", "thumb_1024_url", "thumb_2048_url", "thumb_original_url",
+            "camera_type"
         ]
 
     min_lon, min_lat, max_lon, max_lat = _bbox_around(lat, lon, radius_m)
@@ -79,6 +83,33 @@ def fetch_images(
         if dist <= radius_m:
             img["distance_m"] = dist
             in_radius.append(img)
+    
+    # Filter by camera_type to exclude fisheye lenses
+    initial_count = len(in_radius)
+    in_radius = [img for img in in_radius if img.get('camera_type') != 'fisheye' and img.get('camera_type') != 'spherical']
+    filtered_count = initial_count - len(in_radius)
+    if filtered_count > 0:
+        print(f"  [mly_utils] {filtered_count} fisheye images filtered out. {len(in_radius)} remaining.")
+    # Filter by min_capture_date if specified
+    if min_capture_date_filter and in_radius:
+        initial_image_count = len(in_radius)
+        # Mapillary's captured_at is in milliseconds since epoch
+        dated_images = []
+        for img in in_radius:
+            captured_at_ms = img.get('captured_at')
+            if captured_at_ms:
+                img_capture_date = datetime.fromtimestamp(captured_at_ms / 1000).date()
+                if img_capture_date >= min_capture_date_filter:
+                    dated_images.append(img)
+            # else: image without captured_at is kept if no date filter, or implicitly dropped here if date filter exists
+        
+        filtered_count = initial_image_count - len(dated_images)
+        if filtered_count > 0:
+            print(f"  [mly_utils] {filtered_count} images filtered out by min_capture_date ({min_capture_date_filter.strftime('%Y-%m-%d')}). {len(dated_images)} remaining.")
+        elif initial_image_count > 0: # Only print if there were images to begin with
+            print(f"  [mly_utils] No images filtered by min_capture_date ({min_capture_date_filter.strftime('%Y-%m-%d')}).")
+        in_radius = dated_images # Update in_radius with date-filtered images
+
     return in_radius
 
 def filter_images_fov(
